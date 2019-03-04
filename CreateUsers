@@ -16,25 +16,20 @@ if ($execPolicy -eq "AllSigned" -or $execPolicy -eq "Default" -or $execPolicy -e
 }
 
 
-Write-host -ForegroundColor DarkCyan "This script will guide you through deploying users to any Office 365 tenant"
-Write-host -ForegroundColor DarkCyan " "
-Start-Sleep -Seconds 3
-Write-host -ForegroundColor DarkCyan "Please note what type of Licenses your test tenant has available"
-Write-host -ForegroundColor DarkCyan "You will need to choose the correct type of license, or the users will not be licensed correctly"
-Start-Sleep -Seconds 8
-Write-host -ForegroundColor DarkCyan "Starting the script.."
-Start-Sleep -Seconds 2
+Write-host -ForegroundColor DarkCyan @"
+This script will guide you through deploying users to any Office 365 tenant
+Please note what type of Licenses your test tenant has available
+You will need to choose the correct type of license, or the users will not be licensed correctly
+"@
+Pause
 
 Write-host "Is this a demos.microsoft.com tenant?"
-Start-Sleep -Seconds 1
 $demoTenant = Read-Host "Is this a Demo tenant? y/n"
 if ($demoTenant -eq 'y' -or $demoTenant -eq 'yes') {
     Write-host "Do you want to remove the users?"
-    Start-Sleep -Seconds 1
     $confirmDemo = Read-Host "Remove demo tenant users? y/n"
         if ($confirmDemo -eq 'n' -or $confirmDemo -eq 'no') {
-        write-host -ForegroundColor Red "If you do not want to delete the users, this script is useless. Please read the documentation on what this script does" 
-        write-host -ForegroundColor Red "Re-run the script if you feel comfortable with deleting the users. Notice that Admin will prevail"
+        write-host -ForegroundColor Red "If you do not want to delete the users, this script is useless. Please read the documentation on what this script does.`nRe-run the script if you feel comfortable with deleting the users. Notice that Admin will prevail"
         Break
     }
 }
@@ -107,12 +102,10 @@ switch -Regex ( $choice ) {
 #Check if necessary modules are installed, if not install them
 Write-host -ForegroundColor DarkCyan "We will now check if you have all the modules required to create users and attributes in O365"
 Write-host -ForegroundColor DarkCyan " "
-Start-Sleep -Seconds 3
 Write-host -ForegroundColor DarkCyan "The modules checked are:"
 Write-host -ForegroundColor DarkCyan "AzureAD, Sharepoint PnP, Exchange Online,  Microsoft Online"
-Start-Sleep -Seconds 5
 Write-host -ForegroundColor DarkCyan "Continuing..."
-Start-Sleep -Seconds 1
+Start-Sleep -Seconds 3
 Write-Host -ForegroundColor Green "Checking if AzureAD module is installed"
 
 if (Get-Module -ListAvailable -Name AzureADPreview){
@@ -190,35 +183,39 @@ If (($session.ComputerName -eq "ps.outlook.com") -and ($session.State -eq "Opene
     $tenantFQDN = ($O365Cred.username -split("@"))[1]
     $tenantName = ($O365Cred.username -split("@")).split(".")[1]
 
-    #Sharepoint Online Connection
-    #Connect-SPOService -Url https://$tenantname-admin.sharepoint.com -credential $O365Cred
-
-    Try
+Try
     #Sharepoint PnP Connection
 {
     Connect-PnPOnline –Url https://$tenantName.sharepoint.com –Credentials $O365Cred
-    #Exchange Online Connection
 }
-    Catch
+Catch
 {
     Write-Host -ForegroundColor Red "Could not connect to Sharepoint Online - Are you sure it is provisioned? `nIf this is an SDFv2-tenant, it might take up to 300 minutes to provision Sharepoint"
     Break
 }
 
-    Try
+Try
+    #Exchange Online Connection
 {
     $O365Session = New-PSSession –ConfigurationName Microsoft.Exchange -ConnectionUri https://ps.outlook.com/powershell -Credential $O365Cred -Authentication Basic -AllowRedirection
     Import-PSSession $O365Session -AllowClobber
 }
-    Catch
+Catch
 {
     Write-Host -ForegroundColor Red "Could not connect to Exchange Online - Are you sure it is provisioned? `nIf this is an SDFv2-tenant, it might take up to 300 minutes to provision Exchange"
     Write-Host -ForegroundColor DarkMagenta "We failed to read $_.Exception.Itemname. The errer message was $_.Exception.Message"
     Break
 }
-    
+Try
     #Office 365 Connection
+{
     Connect-MsolService –Credential $O365Cred
+}
+Catch
+{
+    Write-Host -ForegroundColor Red "Could not connect to Microsoft Online - Are you sure it is provisioned?"
+    Break
+}
     } else {
     Write-Host -ForegroundColor Cyan "Connecting to MS Online, Exchange Online, and Sharepoint PnP Online"
  
