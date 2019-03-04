@@ -1,0 +1,541 @@
+#BEFORE RUNNING SCRIPT, MAKE SURE YOU ARE RUNNING POWERSHELL IN ADMIN mode 
+$ErrorPreference='Stop'
+
+$execPolicy = Get-ExecutionPolicy
+if ($execPolicy -eq "AllSigned" -or $execPolicy -eq "Default" -or $execPolicy -eq "RemoteSigned" -or $execPolicy -eq "Restricted") {
+    Write-Host "Execution Policy is not set to bypass, setting it temporarily"
+    Try {
+    Set-ExecutionPolicy -ExecutionPolicy Bypass -Force
+    }
+    Catch {
+    Write-Host -ForegroundColor Red "Could not set Execution Policy to Bypass, please run the script in Administrator mode"
+    Write-Host -ForegroundColor Red "Exiting script.."
+    Start-Sleep -Seconds 2
+    Break
+    }
+}
+
+
+Write-host -ForegroundColor DarkCyan "This script will guide you through deploying users to any Office 365 tenant"
+Write-host -ForegroundColor DarkCyan " "
+Start-Sleep -Seconds 3
+Write-host -ForegroundColor DarkCyan "Please note what type of Licenses your test tenant has available"
+Write-host -ForegroundColor DarkCyan "You will need to choose the correct type of license, or the users will not be licensed correctly"
+Start-Sleep -Seconds 8
+Write-host -ForegroundColor DarkCyan "Starting the script.."
+Start-Sleep -Seconds 2
+
+Write-host "Is this a demos.microsoft.com tenant?"
+Start-Sleep -Seconds 1
+$demoTenant = Read-Host "Is this a Demo tenant? y/n"
+if ($demoTenant -eq 'y' -or $demoTenant -eq 'yes') {
+    Write-host "Do you want to remove the users?"
+    Start-Sleep -Seconds 1
+    $confirmDemo = Read-Host "Remove demo tenant users? y/n"
+        if ($confirmDemo -eq 'n' -or $confirmDemo -eq 'no') {
+        write-host -ForegroundColor Red "If you do not want to delete the users, this script is useless. Please read the documentation on what this script does" 
+        write-host -ForegroundColor Red "Re-run the script if you feel comfortable with deleting the users. Notice that Admin will prevail"
+        Break
+    }
+}
+
+#Function to open Windows Explorer and let you choose CSV-files
+Function Get-FileName($initialDirectory)
+{
+    [System.Reflection.Assembly]::LoadWithPartialName("System.windows.forms") | Out-Null
+    
+    $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $OpenFileDialog.initialDirectory = $initialDirectory
+    $OpenFileDialog.filter = "CSV (*.csv)| *.csv"
+    $OpenFileDialog.ShowDialog() | Out-Null
+    $OpenFileDialog.filename
+}
+do {
+    Write-Host -BackgroundColor DarkGray -ForegroundColor Yellow "Please Choose your License type for the trial"
+    Write-Host ""
+    Write-Host -ForegroundColor Red "A " -NoNewline; Write-Host "- " -NoNewline; Write-Host -BackgroundColor Red -ForegroundColor Yellow "Office 365 E3"
+    Write-Host -ForegroundColor Red "B " -NoNewline; Write-Host "- " -NoNewline; Write-Host -BackgroundColor Red -ForegroundColor Yellow "Office 365 E5"
+    Write-Host -ForegroundColor Red "C " -NoNewline; Write-Host "- " -NoNewline; Write-Host -BackgroundColor Red -ForegroundColor Yellow "Microsoft 365 E3"
+    Write-Host -ForegroundColor Red "D " -NoNewline; Write-Host "- " -NoNewline; Write-Host -BackgroundColor Red -ForegroundColor Yellow "Microsoft 365 Business Premium"
+    Write-Host ""
+    Write-Host -ForegroundColor Yellow -BackgroundColor Red "X - Exit"
+    Write-Host ""
+    Write-Host -BackgroundColor DarkGray -ForegroundColor Green -nonewline "Type your choice and press Enter:"
+        
+    $choice = Read-Host
+        
+    Write-Host ""
+        
+    $ok = $choice -match '^[abcdex]+$'
+        
+    if ( -not $ok) { Write-Host "Invalid selection" }
+} until ( $ok )
+    
+switch -Regex ( $choice ) {
+    "A"
+    {
+    Write-Host "You chose Office 365 E3"
+    $subscriptionID = ":ENTERPRISEPACK"
+    }
+
+    "B"
+    {
+    Write-Host "You chose Office 365 E5"
+    $subscriptionID = ":ENTERPRISEPREMIUM"
+    }
+
+    "C"
+    {
+    Write-Host "You chose Microsoft 365 E3 Enterprise"
+    $subscriptionID = ":SPE_E3"
+    }
+
+    "D"
+    {
+    Write-Host "You chose Office 365 Business Premium"
+    $subscriptionID = ":SMB_BUSINESS_PREMIUM"
+    }
+
+    "X"
+    {
+    Write-Host "You chose X - Exiting..."
+    Start-Sleep -Seconds 3
+    Return
+    }
+}
+
+#Check if necessary modules are installed, if not install them
+Write-host -ForegroundColor DarkCyan "We will now check if you have all the modules required to create users and attributes in O365"
+Write-host -ForegroundColor DarkCyan " "
+Start-Sleep -Seconds 3
+Write-host -ForegroundColor DarkCyan "The modules checked are:"
+Write-host -ForegroundColor DarkCyan "AzureAD, Sharepoint PnP, Exchange Online,  Microsoft Online"
+Start-Sleep -Seconds 5
+Write-host -ForegroundColor DarkCyan "Continuing..."
+Start-Sleep -Seconds 1
+Write-Host -ForegroundColor Green "Checking if AzureAD module is installed"
+
+if (Get-Module -ListAvailable -Name AzureADPreview){
+    Write-Host -ForegroundColor Green "Azure AD Module exists"
+    $online = Find-Module -Name AzureADPreview
+    $local = Get-Module -Name AzureADPreview
+    if ($online.Version -gt $local.Version)
+    {
+    Write-Host -ForegroundColor Green "Updating Azure AD Module to latest version"
+    Update-Module AzureADPreview* -Force -Confirm:$false
+    }
+} else {
+    Write-Host -ForegroundColor Red "Azure AD Module does not exist, installing now"
+    Install-module -name AzureADPreview -Force
+    Write-Host -ForegroundColor Green "Azure AD Module is now installed"
+}
+
+Write-Host -ForegroundColor Green "Checking if Sharepoint PnP module is installed"
+if (Get-Module -ListAvailable -Name SharepointPnPPowershellOnline){
+    Write-Host -ForegroundColor Green "Sharepoint PnP Module exists"
+    $online = Find-Module -Name SharepointPnPPowershellOnline
+    $local = Get-Module -Name SharepointPnPPowershellOnline
+    if ($online.Version -gt $local.Version)
+    {
+    Write-Host -ForegroundColor Green "Updating Sharepoint PnP module to latest version"
+    Update-Module SharepointPnPPowershell* -Force -Confirm:$false
+    }
+} else {
+    Write-Host -ForegroundColor Red "Sharepoint PnP does not exist, installing now"
+    Install-module -name SharepointPnPPowershellOnline -Force
+    Write-Host -ForegroundColor Green "Sharepoint PnP Module is now installed"
+}
+
+Write-Host -ForegroundColor Green "Checking if  Microsoft Online module is installed"
+if (Get-Module -ListAvailable -Name MSOnline) {
+    Write-Host -ForegroundColor Green "MSOnline Module exists"
+    $online = Find-Module -Name MSOnline
+    $local = Get-Module -Name MSOnline
+    if ($online.Version -gt $local.Version)
+    {
+    Write-Host -ForegroundColor Green "Updating Microsoft Online module to latest version"
+    Update-Module MSOnline* -Force -Confirm:$false
+    }
+} else {
+    Write-Host -ForegroundColor Red "MSOnline Module does not exist, installing now"
+    Install-module -name MSOnline -Force
+    Write-Host -ForegroundColor Green "MSOnline Module is now installed"
+}
+
+<#Write-Host "Checking if Sharepoint Online module is installed"
+if (Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell) {
+    Write-Host -ForegroundColor Green "Sharepoint Module exists, updating module and continuing setup"
+    Update-Module Microsoft.Online.SharePoint.PowerShell* -Force -Confirm:$false
+} else {
+    Write-Host -ForegroundColor Red "Sharepoint Module does not exist, installing now"
+    Install-module -name Microsoft.Online.SharePoint.PowerShell -Force
+    Write-Host -ForegroundColor Green "Sharepoint Module is now installed"
+}
+#>
+
+
+$session = Get-PSSession
+Import-Module MSOnline,SharepointPnPPowershellOnline,AzureADPreview
+
+
+If (($session.ComputerName -eq "ps.outlook.com") -and ($session.State -eq "Opened")) {
+    Remove-PSSession -Session $o365Session
+    Write-Host "Refreshing connection to MS Online, Exchange Online, and Sharepoint PnP Online for new roles"
+
+    $O365Cred = Get-Credential -Message "Log on to Office 365 services"
+
+    #Tenant is unique for every new testenvironment. Grab this by splitting the username of the user logging on O365 (admin). 
+    #FQDN for full range "contoso.onmicrosoft.com"
+    #Name for only "Contoso"
+    $tenantFQDN = ($O365Cred.username -split("@"))[1]
+    $tenantName = ($O365Cred.username -split("@")).split(".")[1]
+
+    #Sharepoint Online Connection
+    #Connect-SPOService -Url https://$tenantname-admin.sharepoint.com -credential $O365Cred
+
+    Try
+    #Sharepoint PnP Connection
+{
+    Connect-PnPOnline –Url https://$tenantName.sharepoint.com –Credentials $O365Cred
+    #Exchange Online Connection
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not connect to Sharepoint Online - Are you sure it is provisioned? `nIf this is an SDFv2-tenant, it might take up to 300 minutes to provision Sharepoint"
+    Break
+}
+
+    Try
+{
+    $O365Session = New-PSSession –ConfigurationName Microsoft.Exchange -ConnectionUri https://ps.outlook.com/powershell -Credential $O365Cred -Authentication Basic -AllowRedirection
+    Import-PSSession $O365Session -AllowClobber
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not connect to Exchange Online - Are you sure it is provisioned? `nIf this is an SDFv2-tenant, it might take up to 300 minutes to provision Exchange"
+    Write-Host -ForegroundColor DarkMagenta "We failed to read $_.Exception.Itemname. The errer message was $_.Exception.Message"
+    Break
+}
+    
+    #Office 365 Connection
+    Connect-MsolService –Credential $O365Cred
+    } else {
+    Write-Host -ForegroundColor Cyan "Connecting to MS Online, Exchange Online, and Sharepoint PnP Online"
+ 
+    $O365Cred = Get-Credential -Message "Log on to Office 365"
+
+    <#Tenant is unique for every new testenv. Grab this by splitting the username of the user logging on O365 (admin). 
+    FQDN for full range "contoso.onmicrosoft.com"
+    Name for only "Contoso" #>
+    $tenantFQDN = ($O365Cred.username -split("@"))[1]
+    $tenantName = ($O365Cred.username -split("@")).split(".")[1]
+    
+    Try
+    #Sharepoint PnP Connection
+{
+    Connect-PnPOnline –Url https://$tenantName.sharepoint.com –Credentials $O365Cred
+    #Exchange Online Connection
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not connect to Sharepoint Online - Are you sure it is provisioned? `nIf this is an SDFv2-tenant, it might take up to 300 minutes to provision Sharepoint"
+    Break
+}
+
+    Try
+{
+    $O365Session = New-PSSession –ConfigurationName Microsoft.Exchange -ConnectionUri https://ps.outlook.com/powershell -Credential $O365Cred -Authentication Basic -AllowRedirection 
+    Import-PSSession $O365Session -AllowClobber
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not connect to Exchange Online - Are you sure it is provisioned? `nIf this is an SDFv2-tenant, it might take up to 300 minutes to provision Exchange"
+    Write-Host -ForegroundColor DarkMagenta "We failed to read $_.Exception.Itemname. The errer message was $_.Exception.Message"
+    Break
+}
+    
+    #Office 365 Connection
+    Connect-MsolService –Credential $O365Cred
+    }
+
+#Check if Role is added to Organization Management, if not...add it
+Write-Host -ForegroundColor Cyan "Enabling Exchange Organization Customization, this will take a few minutes"
+    Try
+{
+    Enable-OrganizationCustomization
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not enable Exchange Organization Customization - Is Exchange provisioned? If this is an SDFv2-tenant, it might take up to 300 minutes to provision Exchange"
+    Break
+}
+
+#$orgRoles = Get-ManagementRoleAssignment -RoleAssignee "Organization Management"
+#if ( $orgRoles.role -like "*Address Lists") {
+#write-host -ForegroundColor Green -BackgroundColor DarkGray "User already has Address List role, continuing"
+#} else {
+#Write-Host -ForegroundColor Red -BackgroundColor White "WARNING  `nDo not run ABPCreate before this script has finished completely. ~5 minutes  `nAdding the user to Address Lists to be able to configure ABP" 
+    Try
+{
+    Write-Host -ForegroundColor Cyan "Enabling Address Lists role for your administrator"
+    New-ManagementRoleAssignment -SecurityGroup "Organization Management" -Role "Address Lists" 
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not add role Address Lists to your user - Is Organization Customization enabled? If this is an SDFv2-tenant, it might take up to 300 minutes to provision Exchange"
+    Write-Host -ForegroundColor Red "You can try manually by running Enable-OrganizationCustomization"
+    Break
+}
+#}
+
+#Uses function to get a Windows Explorer window
+$fileCSV = Get-Filename
+
+Write-Host -ForegroundColor Yellow "What delimiter is used for the CSV file? Default is comma"
+Write-Host -ForegroundColor Yellow "Please make sure it is correct, before you pick a delimiter in the next step"
+$delimiter = Read-Host "Type in the Delimiter , - ; |, click Enter to skip to default (,)"
+Switch ($delimiter)
+    {
+    "-" {$csv = "-"}
+    ";" {$csv = ";"}
+    "|" {$csv = "|"}
+    "," {$csv = ","}
+    Default {$csv = ","}
+    }
+
+if ($confirmDemo -eq 'y' -or $confirmDemo -eq 'yes') {
+  # proceed
+  write-host -ForegroundColor DarkYellow "You have chosen to remove demo-users from the tenant"
+  write-host -ForegroundColor DarkYellow "Removing all users" 
+  Get-MsolUser -All | ?{$_.UserPrincipalName -notlike "admin*"} | Remove-MsolUser -Force
+  Get-MsolUser -ReturnDeletedUsers -All | Remove-MsolUser -RemoveFromRecycleBin -Force
+  Get-MsolGroup -All | Remove-MsolGroup -Force
+  Get-DistributionGroup | Remove-DistributionGroup -Confirm:$false
+  Get-UnifiedGroup | Remove-UnifiedGroup -Confirm:$false
+  Get-MailContact | Remove-MailContact -Confirm:$false
+}
+
+#Create Users and Contacts from CSV
+$users = import-csv -Path $fileCSV -Delimiter $csv -Encoding UTF8 
+foreach ($user in $users) 
+    {
+    if ($user.External -eq "True") {
+     Write-Host -ForegroundColor DarkYellow "Creating External User" $user.DisplayName 
+     New-MailContact -Name $user.DisplayName -ExternalEmailAddress $user.UserPrincipalName 
+        } else {
+            if ($user.UserPrincipalName -like "sdfadm*"){
+            Write-Host -ForegroundColor Yellow "Creating administrator " $user.DisplayName "with password" $user.Password
+            New-MsolUser -UserPrincipalName ($user.UserPrincipalName+"@"+$tenantfqdn) -UsageLocation $user.UsageLocation -DisplayName $user.DisplayName -Password $user.Password -ForceChangePassword $false
+            } else {
+                Write-Host -ForegroundColor Yellow "Creating & Licensing user" $user.DisplayName "in Department" $user.Department "with manager" $user.manager  
+                New-MsolUser -UserPrincipalName ($user.UserPrincipalName+"@"+$tenantfqdn) -Department $user.Department -Country $user.Country -StreetAddress $user.StreetAddress -State $user.State -City $user.City -PostalCode $user.PostalCode -AlternateMobilePhones $user.AlternativeMobilePhone -MobilePhone $user.MobilePhone -PhoneNumber $user.HomePhone -Fax $user.Fax -FirstName $user.FirstName -LastName $user.LastName -Office $user.Office -UsageLocation $user.UsageLocation -DisplayName $user.DisplayName -Title $user.Title -Password $user.Password -ForceChangePassword $false -LicenseAssignment "$tenantName$subscriptionID" 
+            }
+        }
+    }
+$roleName="Company Administrator"
+$adminUser = (Get-MsolUser | Where DisplayName -like "SDF Admin")
+Write-Host -ForegroundColor Yellow "Addmin Admin-roles to User" $adminUser.DisplayName
+Add-MsolRoleMember -RoleMemberEmailAddress $adminUser.UserPrincipalName -RoleName $roleName
+
+#Divide members by department for Distribution List Membership
+$OpsGroup = $users | ?{$_.Department -like "Ops"}
+$OpsGroupUsers = $OpsGroup.UserPrincipalName.split(",")
+$AdmGroup = $users | ?{$_.Department -like "Adm"}
+$AdmGroupUsers = $AdmGroup.UserPrincipalName.split(",")
+
+#Create three Distributionlists, add members divided by departments above, and make one Distributionlist HIDDEN
+Write-Host -ForegroundColor DarkCyan "Creating Distributionlists - OpsHidden, OpsDistribution, AdmDistribution"
+    Try
+{
+New-DistributionGroup -Name OpsHidden -DisplayName "OpsHiddenDL" 
+New-DistributionGroup -Name OpsDistribution -DisplayName "OpsDistribution" 
+New-DistributionGroup -Name AdmDistribution -DisplayName "AdmDistribution" 
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not create Distribution lists"
+    Break
+}
+#Create three Office365 groups, add members divided by departments above, and make one O365-group HIDDEN
+Write-Host -ForegroundColor DarkCyan "Creating Office365 Groups - GroupHiddenOps, GroupOps, GroupAdm"
+    Try
+{
+New-UnifiedGroup -DisplayName "GroupOps" -Alias "GroupOps" 
+New-UnifiedGroup -DisplayName "GroupHiddenOps" -Alias "GroupHiddenOps" 
+New-UnifiedGroup -DisplayName "GroupAdm" -Alias "GroupAdm" 
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not create Office 365 Groups"
+    Break
+}
+#Add managers, EXODS attributes, and hide mailboxes set to true in sheet
+write-host -ForegroundColor DarkCyan "Checking to see if groups created exist before trying to add Profile Pictures, and adding members to O365 Groups & Managers"
+
+$FolderPath = Split-Path -Path $fileCSV
+$ProfilePics = "$folderpath\ProfilePics\"
+$i=0
+$count = ($users.photo -like "*.png").count
+write-host -ForegroundColor DarkCyan "Adding Pictures for the users"
+foreach ($user in $users) 
+    {
+    if (!($user.External -eq "True" -or $User.UserPrincipalName -eq "sdfadm")) {
+        $userExists = Get-User $user.UserPrincipalName
+        while ($userExists -eq $null) {
+            Write-Host -ForegroundColor Yellow "User" $user.UserPrincipalName "is not provisioned yet, sleeping"
+            Start-Sleep -Seconds 5
+            $userExists = Get-User $user.UserPrincipalName
+            }
+    $i++
+    $Pic = $ProfilePics+$user.Photo
+    Set-UserPhoto $user.UserPrincipalName -PictureData ([System.IO.File]::ReadAllBytes("$Pic")) -Confirm:$false
+    Write-Host -ForegroundColor DarkCyan "Uploading picture for" $user.DisplayName "number" $i "out of $count"
+    Write-Progress -Activity "Uploading photos [$count]..." -Status $i
+    }
+}
+    Try
+{    
+Write-Host -ForegroundColor DarkCyan "Adding members to GroupOps Office365-Group"
+Add-UnifiedGroupLinks -Identity "GroupOps" -LinkType members -Links $OpsGroupUsers
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not add members to Office 365 Group GroupOps - Does it exist?"
+    Break
+}
+    Try
+{
+Write-Host -ForegroundColor DarkCyan "Adding members to GroupHiddenOps Office365-Group"
+Add-UnifiedGroupLinks -Identity "GroupHiddenOps" -LinkType members -Links $OpsGroupUsers
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not add members to Office 365 Group GroupHiddenOps - Does it exist?"
+    Break
+}
+    Try
+{
+Write-Host -ForegroundColor DarkCyan "Adding members to GroupAdm Office365-Group"
+Add-UnifiedGroupLinks -Identity "GroupAdm" -LinkType members -Links $AdmGroupUsers
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not add members to Office 365 Group GroupAdm - Does it exist?"
+    Break
+}
+    Try
+{
+Write-Host -ForegroundColor DarkCyan "Hiding GroupHiddenOps (Hidden Office365-Group)"
+Set-UnifiedGroup -Identity "GroupHiddenOps" -HiddenFromAddressListsEnabled $True
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not hide Office 365 Group GroupHiddenOps - Does it exist?"
+    Break
+}
+    Try
+{
+Write-Host -ForegroundColor DarkCyan "Hiding OpsHiddenDL (Hidden Distributionlist)"
+Set-DistributionGroup -Identity OpsHiddenDL -HiddenFromAddressListsEnabled $true
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not hide Distribution list OpsHiddenDL - Does it exist?"
+    Break
+}
+    Try
+{
+Write-Host -ForegroundColor DarkCyan "Adding members to OpsHiddenDL and OpsDistribution Distributionlists"
+foreach ($dlOps in $OpsGroupUsers)
+    {
+    Add-DistributionGroupMember -Identity OpsHidden -Member $dlOps
+    Add-DistributionGroupMember -Identity OpsDistribution -Member $dlOps
+    }
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not add members to Distribution lists OpsDistribution and OpsHiddenDL - Do they exist?"
+    Break
+}
+    Try
+{
+Write-Host -ForegroundColor DarkCyan "Adding members to AdmDistribution Distributionlists"
+foreach ($dlAdm in $AdmGroupUsers)
+    {
+    Add-DistributionGroupMember -Identity AdmDistribution -Member $dlAdm
+    }
+}
+    Catch
+{
+    Write-Host -ForegroundColor Red "Could not add members to Distribution list AdmDistribution - Does it exist?"
+    Break
+}
+foreach ($user in $users) {
+    if (! ($user.UserPrincipalName -like "sdfadm" -or $user.External -eq "True" -or $user.Title -like "CEO")) {
+    Set-User -identity $user.UserPrincipalName -Company $user.Company -Manager $user.Manager -Initials $user.Initials -Pager $user.Pager -WebPage $user.WebPage  -OtherHomePhone $user.OtherHomePhone -OtherTelephone $user.OtherTelephone -OtherFax $user.OtherFax -Phone $user.Phone -Fax $user.Fax -MobilePhone $user.MobilePhone -HomePhone $user.HomePhone
+    Write-Host -ForegroundColor Cyan "Adding extra properties to user (Phone, fax, pager, etc):" $user.UserPrincipalName
+    } Else {
+        if ($user.Title -like "CEO") {
+        Set-User -identity $user.UserPrincipalName -Company $user.Company  -Initials $user.Initials -Pager $user.Pager -WebPage $user.WebPage  -OtherHomePhone $user.OtherHomePhone -OtherTelephone $user.OtherTelephone -OtherFax $user.OtherFax -Phone $user.Phone -Fax $user.Fax -MobilePhone $user.MobilePhone -HomePhone $user.HomePhone
+        Write-Host -ForegroundColor Cyan "Adding extra properties to user (Phone, fax, pager, etc):" $user.UserPrincipalName
+        }
+    }
+     
+     if ($user.AssistantName.length -gt 2){
+        Set-User -identity $user.UserPrincipalName -AssistantName $user.AssistantName
+        Write-Host -ForegroundColor DarkCyan "Adding assistant to this user"
+        }
+
+
+    if ($user.HiddenMB -gt 2) {
+        Set-Mailbox -Identity $user.UserPrincipalName -HiddenFromAddressListsEnabled $true
+        Write-Host -ForegroundColor DarkCyan "Hiding mailbox on this user"
+        }
+
+  }
+
+$PnPfile = "$folderpath\PnPAttributes.csv"
+
+    $wshell = New-Object -ComObject Wscript.Shell  
+    try {  
+        $ctx = Get-PnPContext  
+    } catch {  
+        $wshell.Popup("Please connect to tenant admin site!", 0, "Done", 0x1)  
+    }  
+    if ($ctx) {  
+        $UserData = Import-Csv $PnPfile -Encoding UTF8 -Delimiter $csv
+
+        $rows = $UserData | measure  
+
+        $ColumnName = $userdata[0].psobject.properties.name
+         
+        for ($i = 0; $i -lt $rows.Count; $i++) {  
+            $UserPrincipalName = $UserData[$i].UserPrincipalName
+             
+            Write-Host "Updating data for $UserPrincipalName"  
+
+            for ($j = 1; $j -lt $ColumnName.Count; $j++) {  
+                $value = $UserData[$i].($ColumnName[$j])  
+                if (($value.Length -ge 3) -and(($value.Substring(0, 3) -eq "i:0") -or($value.SubString(0, 3) -eq "c:0"))) {  
+                   # if ($ColumnName.Name -ne "UserPrincipalName") {
+                    Set-PnPUserProfileProperty -Account "$UserPrincipalName@$tenantfqdn" -PropertyName $ColumnName[$j] -Values $value -ErrorAction SilentlyContinue -Verbose
+                   # } 
+                } else {# split the string using the | as a delimiter and load the values into the field. 
+                   # if ($ColumnName.Name -ne "UserPrincipalName") { 
+                    Set-PnPUserProfileProperty -Account "$UserPrincipalName@$tenantfqdn" -PropertyName $ColumnName[$j] -Values $value.Split("|") -ErrorAction SilentlyContinue 
+                   # } 
+                }  
+                if ($?) {  
+                    Write-Host "Set $($ColumnName[$j]) --> $($UserData[$i].($ColumnName[$j]))." -ForegroundColor Green  
+                } else {  
+                    Write-Host " Could not set $($ColumnName[$j]) --> $($UserData[$i].($ColumnName[$j])). $($error[0].Exception.message)" -ForegroundColor Red  
+                }  
+            }  
+        }  
+        $wshell.Popup("Operation Completed!", 0, "Done", 0x1)  
+    }  
+
+    
+
+    Write-Host "Script ran successfully, setting Execution Policy to Default"
+    Set-ExecutionPolicy -ExecutionPolicy Default -Force
