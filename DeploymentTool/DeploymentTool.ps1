@@ -65,7 +65,7 @@ $choiceOnPremCloud = $anybox | Show-AnyBox
 
 
 # Teams Webhook Usage Channel 
-$TeamsChannelUri = "https://outlook.office.com/webhook/c51fbb48-de5b-4fa9-a470-71f546aef43f@72f988bf-86f1-41af-91ab-2d7cd011db47/IncomingWebhook/f42496660a0c4a89ac7f806a0bfdae45/a7930336-98e4-4b54-a4a0-cf6e5a1286b9"
+$TeamsChannelUri = "https://outlook.office.com/webhook/"
  
 $BodyTemplate = @"
     {
